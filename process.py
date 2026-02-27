@@ -7,25 +7,29 @@ import glob
 import os
 import functools
 
-def generate_image_lines(width: int, height: int, color_enabled: bool, verbose: bool, filename: str) -> tuple[str, list[str]]:
+class GenerateSettings:
+    width: int
+    height: int
+    color: bool
+
+def generate_image_lines(settings: GenerateSettings, verbose: bool, filename: str) -> tuple[tuple[str, list[str]], list[tuple[str, str]]]:
     img = Image.open(filename)
-    img = img.resize((width, height))
+    img = img.resize((settings.width, settings.height))
 
 
     width, height = img.size
 
-    image_lines = []
-
     if verbose:
         print(filename)
 
+    video_lines = []
     for y in range(height):
-        last_color = None
         row = ""
+        last_color = None
         for x in range(width):
             r, g, b = img.getpixel((x, y))
             color = (r, g, b)
-            if color_enabled:
+            if settings.color:
                 if color != last_color:
                     row += f"\033[38;2;{r};{g};{b}m"
                     last_color = color
@@ -36,12 +40,14 @@ def generate_image_lines(width: int, height: int, color_enabled: bool, verbose: 
                 brightness_chars = " .*:$@"
                 row += brightness_chars[round((brightness / 255) * (len(brightness_chars)-1))]
 
-        if color_enabled:
+        if settings.color:
             row += "\033[0m"
 
-        image_lines.append(row)
+        video_lines.append(row)
 
-    return (filename, image_lines)
+    sample_files = []
+
+    return ((filename, video_lines), sample_files)
 
 def main():
     parser = argparse.ArgumentParser(
@@ -65,11 +71,16 @@ def main():
     verbose = bool(args.verbose)
     jobs = int(args.jobs)
 
-    image_gen_func = functools.partial(generate_image_lines, width, height, color, verbose)
+    settings = GenerateSettings()
+    settings.width = width
+    settings.height = height
+    settings.color = color
+
+    image_gen_func = functools.partial(generate_image_lines, settings, verbose)
 
     with multiprocessing.Pool(jobs) as p:
         last_image_lines = []
-        for image_file, image_lines in p.imap(image_gen_func, natsorted(glob.glob(os.path.join(frame_dir, "*.png")))):
+        for (image_file, image_lines), audio_frames in p.imap(image_gen_func, natsorted(glob.glob(os.path.join(frame_dir, "*.png")))):
             with open(image_file + ".txt", "w") as f:
                 changes = {}
                 for i, (old_line, new_line) in enumerate(zip_longest(last_image_lines, image_lines)):
@@ -97,6 +108,10 @@ def main():
 
                 f.write("".join(buffer))
                 last_image_lines = image_lines
+
+            for (audio_file, audio_data) in audio_frames:
+                with open(audio_file + ".txt", "w") as f:
+                    f.write(audio_data)
 
 if __name__ == "__main__":
     main()
